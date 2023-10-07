@@ -92,17 +92,18 @@ class AddressBookAPI {
             $promises = [];
             
             foreach($netids as $k => $v)
-                $promises[] = ($this -> amqp -> call(
+                $promises[] = $this -> amqp -> call(
                     'wallet.io',
                     'getNetwork',
                     [
                         'netid' => $v
                     ]
                 ) -> then(
-                    function($data) use(&$adbk, $k) {
+                    function($data) use(&$adbk, $k, $th) {
                         $adbk[$k]['network'] = $data;
+                        $th -> log -> debug('Appended to '.$k);
                     }
-                ));
+                );
             
             return Promise\all($promises) -> then(
                 function() use($adbk, $pag) {
