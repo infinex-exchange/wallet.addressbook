@@ -99,15 +99,14 @@ class AddressBookAPI {
                         'netid' => $v
                     ]
                 ) -> then(
-                    function($data) use(&$adbk, $k, $th) {
+                    function($data) use(&$adbk, $k) {
                         $adbk[$k]['network'] = $data;
-                        $th -> log -> debug('Appended to '.$k);
+                        var_dump($adbk);
                     }
                 );
             
             return Promise\all($promises) -> then(
-                function() use($adbk, $pag, $th) {
-                    $th -> log -> debug('Return');
+                function() use($adbk, $pag) {
                     return [
                         'addresses' => $adbk,
                         'more' => $pag -> more
