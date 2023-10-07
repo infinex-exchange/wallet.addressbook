@@ -209,7 +209,7 @@ class AddressBookAPI {
             ':name' => $body['name']
         ];
         
-        $sql = 'UPDATE withrawal_adbk
+        $sql = 'UPDATE withdrawal_adbk
                 SET name = :name
                 WHERE uid = :uid
                 AND adbkid = :adbkid
