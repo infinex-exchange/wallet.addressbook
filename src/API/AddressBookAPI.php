@@ -106,7 +106,8 @@ class AddressBookAPI {
                 );
             
             return Promise\all($promises) -> then(
-                function() use($adbk, $pag) {
+                function() use($adbk, $pag, $th) {
+                    $th -> log -> debug('Return');
                     return [
                         'addresses' => $adbk,
                         'more' => $pag -> more
