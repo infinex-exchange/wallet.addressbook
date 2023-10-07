@@ -116,8 +116,6 @@ class AddressBookAPI {
     }
     
     public function getAddress($path, $query, $body, $auth) {
-        $th = $this;
-        
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
@@ -138,7 +136,7 @@ class AddressBookAPI {
                 WHERE uid = :uid
                 AND adbkid = :adbkid';
         
-        $q = $th -> pdo -> prepare($sql);
+        $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
         $row = $q -> fetch();
         
@@ -164,6 +162,87 @@ class AddressBookAPI {
                 return $adbk;
             }
         );
+    }
+    
+    public function deleteAddress($path, $query, $body, $auth) {
+        if(!$auth)
+            throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
+        
+        if(!$this -> validateAdbkid($path['adbkid']))
+            throw new Error('VALIDATION_ERROR', 'adbkid', 400);
+        
+        $task = [
+            ':uid' => $auth['uid'],
+            ':adbkid' => $path['adbkid']
+        ];
+        
+        $sql = 'DELETE FROM withdrawal_adbk
+                WHERE uid = :uid
+                AND adbkid = :adbkid
+                RETURNING 1';
+        
+        $q = $this -> pdo -> prepare($sql);
+        $q -> execute($task);
+        $row = $q -> fetch();
+        
+        if(!$row)
+            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
+    }
+    
+    public function editAddress($path, $query, $body, $auth) {
+        if(!$auth)
+            throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
+        
+        if(!isset($body['name']))
+            throw new Error('MISSING_DATA', 'name', 400);
+        
+        if(!$this -> validateAdbkid($path['adbkid']))
+            throw new Error('VALIDATION_ERROR', 'adbkid', 400);
+        if(!$this -> adbk -> validateAdbkName($body['name']))
+            throw new Error('VALIDATION_ERROR', 'name', 400);
+        
+        $this -> pdo -> beginTransaction();
+        
+        $task = [
+            ':uid' => $auth['uid'],
+            ':adbkid' => $path['adbkid'],
+            ':name' => $body['name']
+        ];
+        
+        $sql = 'UPDATE withrawal_adbk
+                SET name = :name
+                WHERE uid = :uid
+                AND adbkid = :adbkid
+                RETURNING netid';
+        
+        $q = $this -> pdo -> prepare($sql);
+        $q -> execute($task);
+        $row = $q -> fetch();
+        
+        if(!$row) {
+            $this -> pdo -> rollBack();
+            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
+        }
+        
+        $task[':netid'] = $row['netid'];
+        
+        $sql = 'SELECT 1
+                FROM withdrawal_adbk
+                WHERE uid = :uid
+                AND netid = :netid
+                AND name = :name
+                AND adbkid != :adbkid';
+        
+        $q = $this -> pdo -> prepare($sql);
+        $q -> execute($task);
+        $row = $q -> fetch();
+        
+        if($row) {
+            $this -> pdo -> rollBack();
+            throw new Error('CONFLICT', 'Name already used in address book', 409);
+        }
+        
+        $this -> pdo -> commit();
     }
     
     private function validateAdbkid($adbkid) {
