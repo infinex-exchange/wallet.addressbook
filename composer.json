@@ -1,0 +1,17 @@
+{
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/infinex-exchange/common"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/infinex-exchange/bunny"
+        }
+    ],
+    "require": {
+        "infinex-exchange/common": "dev-main"
+    }
+}
