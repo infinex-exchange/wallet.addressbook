@@ -21,10 +21,10 @@ class AddressBookAPI {
     }
     
     public function initRoutes($rc) {
-        $rc -> get('/addressbook', [$this, 'getAllAddresses']);
-        $rc -> get('/addressbook/{adbkid}', [$this, 'getAddress']);
-        $rc -> patch('/addressbook/{adbkid}', [$this, 'editAddress']);
-        $rc -> delete('/addressbook/{adbkid}', [$this, 'deleteAddress']);
+        $rc -> get('/', [$this, 'getAllAddresses']);
+        $rc -> get('/{adbkid}', [$this, 'getAddress']);
+        $rc -> patch('/{adbkid}', [$this, 'editAddress']);
+        $rc -> delete('/{adbkid}', [$this, 'deleteAddress']);
     }
     
     public function getAllAddresses($path, $query, $body, $auth) {
