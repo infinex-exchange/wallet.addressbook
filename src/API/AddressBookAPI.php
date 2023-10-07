@@ -101,12 +101,11 @@ class AddressBookAPI {
                 ) -> then(
                     function($data) use(&$adbk, $k) {
                         $adbk[$k]['network'] = $data;
-                        var_dump($adbk);
                     }
                 );
             
             return Promise\all($promises) -> then(
-                function() use($adbk, $pag) {
+                function() use(&$adbk, $pag) {
                     return [
                         'addresses' => $adbk,
                         'more' => $pag -> more
