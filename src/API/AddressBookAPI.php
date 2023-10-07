@@ -15,7 +15,7 @@ class AddressBookAPI {
         $this -> log = $log;
         $this -> amqp = $amqp;
         $this -> pdo = $pdo;
-        $this -> adbk = $assets;
+        $this -> adbk = $adbk;
         
         $this -> log -> debug('Initialized address book API');
     }
