@@ -58,6 +58,8 @@ class AddressBookAPI {
             $task = [
                 ':uid' => $auth['uid']
             ];
+            if($netid)
+                $task[':netid'] = $netid;
             $search -> updateTask($task);
             
             $sql = 'SELECT adbkid,
@@ -66,8 +68,12 @@ class AddressBookAPI {
                            name,
                            memo
                     FROM withdrawal_adbk
-                    WHERE uid = :uid'
-                 . $search -> sql()
+                    WHERE uid = :uid';
+            
+            if($netid)
+                $sql .= ' AND netid = :netid';
+            
+            $sql .= $search -> sql()
                  .' ORDER BY adbkid ASC'
                  . $pag -> sql();
             
@@ -87,6 +93,16 @@ class AddressBookAPI {
                 ];
                 
                 $netids[] = $row['netid'];
+            }
+            
+            if($netid) {
+                foreach($i = 0; $i < count($adbk); $i++)
+                    $adbk[$i]['network'] = $query['network'];
+                
+                return [
+                    'addresses' => $adbk,
+                    'more' => $pag -> more
+                ];
             }
             
             $promises = [];
