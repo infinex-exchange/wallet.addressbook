@@ -96,7 +96,7 @@ class AddressBookAPI {
             }
             
             if($netid) {
-                foreach($i = 0; $i < count($adbk); $i++)
+                for($i = 0; $i < count($adbk); $i++)
                     $adbk[$i]['network'] = $query['network'];
                 
                 return [
