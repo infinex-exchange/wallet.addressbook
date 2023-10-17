@@ -89,13 +89,13 @@ class AddressBook {
         if(isset($body['netid']) && !is_string($body['netid']))
             throw new Error('VALIDATION_ERROR', 'netid');
             
-        $pag = new Pagination\Offset(50, 500, $query);
+        $pag = new Pagination\Offset(50, 500, $body);
         $search = new Search(
             [
                 'name',
                 'address'
             ],
-            $query
+            $body
         );
             
         $task = [];
