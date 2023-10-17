@@ -148,7 +148,7 @@ class AddressBook {
             throw new Error('VALIDATION_ERROR', 'adbkid', 400);
         
         $task = [
-            ':adbkid' => $path['adbkid']
+            ':adbkid' => $body['adbkid']
         ];
         
         $sql = 'SELECT adbkid,
@@ -170,7 +170,7 @@ class AddressBook {
         return $this -> rtrAddress($row);
     }
     
-    public function deleteAddress($path, $query, $body, $auth) {
+    public function deleteAddress($body) {
         if(!isset($body['adbkid']))
             throw new Error('MISSING_DATA', 'adbkid', 400);
         
@@ -178,7 +178,7 @@ class AddressBook {
             throw new Error('VALIDATION_ERROR', 'adbkid', 400);
         
         $task = [
-            ':adbkid' => $path['adbkid']
+            ':adbkid' => $body['adbkid']
         ];
         
         $sql = 'DELETE FROM withdrawal_adbk
@@ -193,7 +193,7 @@ class AddressBook {
             throw new Error('NOT_FOUND', 'Address '.$body['adbkid'].' not found', 404);
     }
     
-    public function editAddress($path, $query, $body, $auth) {
+    public function editAddress($body) {
         if(!isset($body['adbkid']))
             throw new Error('MISSING_DATA', 'adbkid', 400);
         if(!isset($body['name']))
