@@ -25,6 +25,26 @@ class AddressBook {
         $promises = [];
         
         $promises[] = $this -> amqp -> method(
+            'getAddresses',
+            [$this, 'getAddresses']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'getAddress',
+            [$this, 'getAddress']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'deleteAddress',
+            [$this, 'deleteAddress']
+        );
+        
+        $promises[] = $this -> amqp -> method(
+            'editAddress',
+            [$this, 'editAddress']
+        );
+        
+        $promises[] = $this -> amqp -> method(
             'createAddress',
             [$this, 'createAddress']
         );
@@ -46,6 +66,10 @@ class AddressBook {
         
         $promises = [];
         
+        $promises[] = $this -> amqp -> unreg('getAddresses');
+        $promises[] = $this -> amqp -> unreg('getAddress');
+        $promises[] = $this -> amqp -> unreg('deleteAddress');
+        $promises[] = $this -> amqp -> unreg('editAddress');
         $promises[] = $this -> amqp -> unreg('createAddress');
         
         return Promise\all($promises) -> then(
@@ -78,13 +102,23 @@ class AddressBook {
         $search -> updateTask($task);
         
         $sql = 'SELECT adbkid,
+                       uid,
                        netid,
                        address,
                        name,
                        memo
-                FROM withdrawal_adbk';
+                FROM withdrawal_adbk
+                WHERE 1=1';
         
-        if(
+        if(isset($body['uid'])) {
+            $task[':uid'] = $body['uid'];
+            $sql .= ' AND uid = :uid';
+        }
+        
+        if(isset($body['netid'])) {
+            $task[':netid'] = $body['netid'];
+            $sql .= ' AND netid = :netid';
+        }
             
         $sql .= $search -> sql()
              .' ORDER BY adbkid ASC'
@@ -93,121 +127,62 @@ class AddressBook {
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
             
-            $adbk = [];
-            $netids = [];
+        $adbk = [];
+        
+        while($row = $q -> fetch()) {
+            if($pag -> iter()) break;
+            $adbk[] = $this -> rtrAddress($row);
+        }
             
-            while($row = $q -> fetch()) {
-                if($pag -> iter()) break;
-                $adbk[] = [
-                    'adbkid' => $row['adbkid'],
-                    'name' => $row['name'],
-                    'address' => $row['address'],
-                    'memo' => $row['memo']
-                ];
-                
-                $netids[] = $row['netid'];
-            }
-            
-            if($netid) {
-                for($i = 0; $i < count($adbk); $i++)
-                    $adbk[$i]['network'] = $query['network'];
-                
-                return [
-                    'addresses' => $adbk,
-                    'more' => $pag -> more
-                ];
-            }
-            
-            $promises = [];
-            
-            foreach($netids as $k => $v)
-                $promises[] = $this -> amqp -> call(
-                    'wallet.io',
-                    'getNetwork',
-                    [
-                        'netid' => $v
-                    ]
-                ) -> then(
-                    function($data) use(&$adbk, $k) {
-                        $adbk[$k]['network'] = $data;
-                    }
-                );
-            
-            return Promise\all($promises) -> then(
-                function() use(&$adbk, $pag) {
-                    return [
-                        'addresses' => $adbk,
-                        'more' => $pag -> more
-                    ];
-                }
-            );
-        });
+        return [
+            'addresses' => $adbk,
+            'more' => $pag -> more
+        ];
     }
     
-    public function getAddress($path, $query, $body, $auth) {
-        if(!$auth)
-            throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
+    public function getAddress($body) {
+        if(!isset($body['adbkid']))
+            throw new Error('MISSING_DATA', 'adbkid', 400);
         
-        if(!$this -> validateAdbkid($path['adbkid']))
+        if(!validateId($body['adbkid']))
             throw new Error('VALIDATION_ERROR', 'adbkid', 400);
         
         $task = [
-            ':uid' => $auth['uid'],
             ':adbkid' => $path['adbkid']
         ];
         
         $sql = 'SELECT adbkid,
+                       uid,
                        netid,
                        address,
                        name,
                        memo
                 FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND adbkid = :adbkid';
+                WHERE adbkid = :adbkid';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
         $row = $q -> fetch();
         
         if(!$row)
-            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
+            throw new Error('NOT_FOUND', 'Address '.$body['adbkid'].' not found', 404);
             
-        $adbk = [
-            'adbkid' => $row['adbkid'],
-            'name' => $row['name'],
-            'address' => $row['address'],
-            'memo' => $row['memo']
-        ];
-
-        return $this -> amqp -> call(
-            'wallet.io',
-            'getNetwork',
-            [
-                'netid' => $row['netid']
-            ]
-        ) -> then(
-            function($data) use($adbk) {
-                $adbk['network'] = $data;
-                return $adbk;
-            }
-        );
+        return $this -> rtrAddress($row);
     }
     
     public function deleteAddress($path, $query, $body, $auth) {
-        if(!$auth)
-            throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
+        if(!isset($body['adbkid']))
+            throw new Error('MISSING_DATA', 'adbkid', 400);
         
-        if(!$this -> validateAdbkid($path['adbkid']))
+        if(!validateId($body['adbkid']))
             throw new Error('VALIDATION_ERROR', 'adbkid', 400);
         
         $task = [
-            ':uid' => $auth['uid'],
             ':adbkid' => $path['adbkid']
         ];
         
         $sql = 'DELETE FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND adbkid = :adbkid
+                WHERE adbkid = :adbkid
                 RETURNING 1';
         
         $q = $this -> pdo -> prepare($sql);
@@ -215,52 +190,57 @@ class AddressBook {
         $row = $q -> fetch();
         
         if(!$row)
-            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
+            throw new Error('NOT_FOUND', 'Address '.$body['adbkid'].' not found', 404);
     }
     
     public function editAddress($path, $query, $body, $auth) {
-        if(!$auth)
-            throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
-        
+        if(!isset($body['adbkid']))
+            throw new Error('MISSING_DATA', 'adbkid', 400);
         if(!isset($body['name']))
             throw new Error('MISSING_DATA', 'name', 400);
         
-        if(!$this -> validateAdbkid($path['adbkid']))
+        if(!validateId($body['adbkid']))
             throw new Error('VALIDATION_ERROR', 'adbkid', 400);
-        if(!$this -> adbk -> validateAdbkName($body['name']))
+        if(!$this -> validateAdbkName($body['name']))
             throw new Error('VALIDATION_ERROR', 'name', 400);
         
         $this -> pdo -> beginTransaction();
         
+        // Get uid and netid
         $task = [
-            ':uid' => $auth['uid'],
-            ':adbkid' => $path['adbkid'],
-            ':name' => $body['name']
+            ':adbkid' => $body['adbkid']
         ];
         
-        $sql = 'UPDATE withdrawal_adbk
-                SET name = :name
-                WHERE uid = :uid
-                AND adbkid = :adbkid
-                RETURNING netid';
+        $sql = 'SELECT uid,
+                       netid
+                FROM withdrawal_adbk
+                WHERE adbkid = :adbkid
+                FOR UPDATE';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
-        $row = $q -> fetch();
+        $addr = $q -> fetch();
         
-        if(!$row) {
+        if(!$addr) {
             $this -> pdo -> rollBack();
-            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
+            throw new Error('NOT_FOUND', 'Address '.$body['adbkid'].' not found', 404);
         }
         
-        $task[':netid'] = $row['netid'];
+        // Check address with the same name exists
+        $task = [
+            ':uid' => $addr['uid'],
+            ':netid' => $addr['netid'],
+            ':name' => $body['name'],
+            ':adbkid' => $body['adbkid']
+        ];
         
         $sql = 'SELECT 1
                 FROM withdrawal_adbk
                 WHERE uid = :uid
                 AND netid = :netid
                 AND name = :name
-                AND adbkid != :adbkid';
+                AND adbkid != :adbkid
+                FOR UPDATE';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
@@ -271,21 +251,43 @@ class AddressBook {
             throw new Error('CONFLICT', 'Name already used in address book', 409);
         }
         
+        // Update
+        $task = [
+            ':adbkid' => $body['adbkid'],
+            ':name' => $body['name']
+        ];
+        
+        $sql = 'UPDATE withdrawal_adbk
+                SET name = :name
+                WHERE adbkid = :adbkid';
+        
+        $q = $this -> pdo -> prepare($sql);
+        $q -> execute($task);
+        
         $this -> pdo -> commit();
     }
     
     public function createAddress($body) {
         if(!isset($body['uid']))
-            throw new Error('MISSING_DATA', 'uid', 400);
+            throw new Error('MISSING_DATA', 'uid');
         if(!isset($body['netid']))
-            throw new Error('MISSING_DATA', 'netid', 400);
+            throw new Error('MISSING_DATA', 'netid');
         if(!isset($body['address']))
-            throw new Error('MISSING_DATA', 'address', 400);
+            throw new Error('MISSING_DATA', 'address');
         if(!isset($body['name']))
             throw new Error('MISSING_DATA', 'name', 400);
         
+        if(!validateId($body['uid']))
+            throw new Error('VALIDATION_ERROR', 'uid');
+        if(!is_string($body['netid']))
+            throw new Error('VALIDATION_ERROR', 'netid');
+        if(!is_string($body['address']))
+            throw new Error('VALIDATION_ERROR', 'address');
         if(!$this -> validateAdbkName($body['name']))
             throw new Error('VALIDATION_ERROR', 'name', 400);
+        
+        if(isset($body['memo']) && !is_string($body['memo']))
+            throw new Error('VALIDATION_ERROR', 'memo');
         
         $this -> pdo -> beginTransaction();
         
@@ -294,7 +296,7 @@ class AddressBook {
             ':netid' => $body['netid'],
             ':address' => $body['address'],
             ':name' => $body['name'],
-            ':memo' => isset($body['memo']) ? $body['memo'] : null
+            ':memo' => @$body['memo']
         );
         
         $sql = 'SELECT name
@@ -335,22 +337,33 @@ class AddressBook {
                 :address,
                 :name,
                 :memo
-            )';
+            )
+            RETURNING adbkid';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
+        $row = $q -> fetch();
         
         $this -> pdo -> commit();
-    }
-    
-    private function validateAdbkid($adbkid) {
-        if(!is_int($adbkid)) return false;
-        if($adbkid < 1) return false;
-        return true;
+        
+        return [
+            'adbkid' => $row['adbkid']
+        ];
     }
     
     private function validateAdbkName($name) {
         return preg_match('/^[a-zA-Z0-9 ]{1,255}$/', $name);
+    }
+    
+    private function rtrAddress($row) {
+        return [
+            'adbkid' => $row['adbkid'],
+            'uid' => $row['uid'],
+            'netid' => $row['netid'],
+            'name' => $row['name'],
+            'address' => $row['address'],
+            'memo' => $row['memo']
+        ];
     }
 }
 

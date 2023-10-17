@@ -1,8 +1,6 @@
 <?php
 
 use Infinex\Exceptions\Error;
-use Infinex\Pagination;
-use Infinex\Database\Search;
 use React\Promise;
 
 class AddressBookAPI {
@@ -36,96 +34,51 @@ class AddressBookAPI {
         if(isset($query['network']))
             $promise = $this -> amqp -> call(
                 'wallet.io',
-                'symbolToNetId',
-                [
-                    'symbol' => $query['network'],
-                    'allowDisabled' => true
-                ]
+                'getNetwork',
+                [ 'symbol' => $query['network'] ]
             );
         else
             $promise = Promise\resolve(null);
         
-        return $promise -> then(function($netid) use($th, $auth, $query) {
-            $pag = new Pagination\Offset(50, 500, $query);
-            $search = new Search(
-                [
-                    'name',
-                    'address'
-                ],
-                $query
-            );
+        return $promise -> then(function($network) use($th, $auth, $query) {
+            if($network && !$network['enabled'])
+                throw new Error('FORBIDDEN', 'Network '.$query['network'].' is out of service', 403);
             
-            $task = [
-                ':uid' => $auth['uid']
-            ];
-            if($netid)
-                $task[':netid'] = $netid;
-            $search -> updateTask($task);
-            
-            $sql = 'SELECT adbkid,
-                           netid,
-                           address,
-                           name,
-                           memo
-                    FROM withdrawal_adbk
-                    WHERE uid = :uid';
-            
-            if($netid)
-                $sql .= ' AND netid = :netid';
-            
-            $sql .= $search -> sql()
-                 .' ORDER BY adbkid ASC'
-                 . $pag -> sql();
-            
-            $q = $th -> pdo -> prepare($sql);
-            $q -> execute($task);
-            
-            $adbk = [];
-            $netids = [];
-            
-            while($row = $q -> fetch()) {
-                if($pag -> iter()) break;
-                $adbk[] = [
-                    'adbkid' => $row['adbkid'],
-                    'name' => $row['name'],
-                    'address' => $row['address'],
-                    'memo' => $row['memo']
-                ];
-                
-                $netids[] = $row['netid'];
-            }
-            
-            if($netid) {
-                for($i = 0; $i < count($adbk); $i++)
-                    $adbk[$i]['network'] = $query['network'];
-                
-                return [
-                    'addresses' => $adbk,
-                    'more' => $pag -> more
-                ];
-            }
+            $resp = $this -> adbk -> getAddresses([
+                'uid' => $auth['uid'],
+                'netid' => @$network['netid'],
+                'offset' => @$query['offset'],
+                'limit' => @$query['limit'],
+                'q' => @$query['q']
+            ]);
             
             $promises = [];
+            $mapNetworks = [];
             
-            foreach($netids as $k => $v)
-                $promises[] = $this -> amqp -> call(
-                    'wallet.io',
-                    'getNetwork',
-                    [
-                        'netid' => $v
-                    ]
-                ) -> then(
-                    function($data) use(&$adbk, $k) {
-                        $adbk[$k]['network'] = $data;
-                    }
-                );
+            foreach($resp['addresses'] as $record) {
+                $netid = $record['netid'];
+                
+                if(!array_key_exists($netid, $mapNetworks)) {
+                    $mapNetworks[$netid] = null;
+                    
+                    $promises[] = $th -> amqp -> call(
+                        'wallet.io',
+                        'getNetwork',
+                        [ 'netid' => $netid ]
+                    ) -> then(
+                        function($network) use(&$mapNetworks, $netid) {
+                            $mapNetworks[$netid] = $network['symbol'];
+                        }
+                    );
+                }
+            }
             
             return Promise\all($promises) -> then(
-                function() use(&$adbk, $pag) {
-                    return [
-                        'addresses' => $adbk,
-                        'more' => $pag -> more
-                    ];
+                function() use(&$mapNetworks, $resp, $th) {
+                    foreach($resp['addresses'] as $k => $v)
+                        $resp['addresses'][$k] = $th -> ptpAddress($v, $mapNetworks[ $v['netid'] ]);
+                    
+                    return $resp;
                 }
             );
         });
@@ -135,47 +88,20 @@ class AddressBookAPI {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        if(!$this -> validateAdbkid($path['adbkid']))
-            throw new Error('VALIDATION_ERROR', 'adbkid', 400);
+        $address = $this -> adbk -> getAddress([
+            'adbkid' => $path['adbkid']
+        ]);
         
-        $task = [
-            ':uid' => $auth['uid'],
-            ':adbkid' => $path['adbkid']
-        ];
+        if($address['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to address '.$path['adbkid'], 403);
         
-        $sql = 'SELECT adbkid,
-                       netid,
-                       address,
-                       name,
-                       memo
-                FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND adbkid = :adbkid';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
-            
-        $adbk = [
-            'adbkid' => $row['adbkid'],
-            'name' => $row['name'],
-            'address' => $row['address'],
-            'memo' => $row['memo']
-        ];
-
         return $this -> amqp -> call(
             'wallet.io',
             'getNetwork',
-            [
-                'netid' => $row['netid']
-            ]
+            [ 'netid' => $address['netid'] ]
         ) -> then(
-            function($data) use($adbk) {
-                $adbk['network'] = $data;
-                return $adbk;
+            function($network) use($th, $address) {
+                return $th -> ptpAddress($address, $network['symbol']);
             }
         );
     }
@@ -184,87 +110,35 @@ class AddressBookAPI {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        if(!$this -> validateAdbkid($path['adbkid']))
-            throw new Error('VALIDATION_ERROR', 'adbkid', 400);
+        $address = $this -> adbk -> getAddress([
+            'adbkid' => $path['adbkid']
+        ]);
         
-        $task = [
-            ':uid' => $auth['uid'],
-            ':adbkid' => $path['adbkid']
-        ];
+        if($address['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to address '.$path['adbkid'], 403);
         
-        $sql = 'DELETE FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND adbkid = :adbkid
-                RETURNING 1';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row)
-            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
+        $this -> adbk -> deleteAddress([
+            'adbkid' => $path['adbkid']
+        ]);
     }
     
     public function editAddress($path, $query, $body, $auth) {
         if(!$auth)
             throw new Error('UNAUTHORIZED', 'Unauthorized', 401);
         
-        if(!isset($body['name']))
-            throw new Error('MISSING_DATA', 'name', 400);
+        $address = $this -> adbk -> getAddress([
+            'adbkid' => $path['adbkid']
+        ]);
         
-        if(!$this -> validateAdbkid($path['adbkid']))
-            throw new Error('VALIDATION_ERROR', 'adbkid', 400);
-        if(!$this -> adbk -> validateAdbkName($body['name']))
-            throw new Error('VALIDATION_ERROR', 'name', 400);
+        if($address['uid'] != $auth['uid'])
+            throw new Error('FORBIDDEN', 'No permissions to address '.$path['adbkid'], 403);
         
-        $this -> pdo -> beginTransaction();
+        $this -> adbk -> editAddress([
+            'adbkid' => $path['adbkid'],
+            'name' => @$body['name']
+        ]);
         
-        $task = [
-            ':uid' => $auth['uid'],
-            ':adbkid' => $path['adbkid'],
-            ':name' => $body['name']
-        ];
-        
-        $sql = 'UPDATE withdrawal_adbk
-                SET name = :name
-                WHERE uid = :uid
-                AND adbkid = :adbkid
-                RETURNING netid';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if(!$row) {
-            $this -> pdo -> rollBack();
-            throw new Error('NOT_FOUND', 'Address '.$path['adbkid'].' not found', 404);
-        }
-        
-        $task[':netid'] = $row['netid'];
-        
-        $sql = 'SELECT 1
-                FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND netid = :netid
-                AND name = :name
-                AND adbkid != :adbkid';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if($row) {
-            $this -> pdo -> rollBack();
-            throw new Error('CONFLICT', 'Name already used in address book', 409);
-        }
-        
-        $this -> pdo -> commit();
-    }
-    
-    private function validateAdbkid($adbkid) {
-        if(!is_int($adbkid)) return false;
-        if($adbkid < 1) return false;
-        return true;
+        return $this -> getAddress($path, [], [], $auth);
     }
 }
 
