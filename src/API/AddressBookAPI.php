@@ -140,6 +140,16 @@ class AddressBookAPI {
         
         return $this -> getAddress($path, [], [], $auth);
     }
+    
+    private function ptpAddress($record, $networkSymbol) {
+        return [
+            'adbkid' => $record['adbkid'],
+            'network' => $networkSymbol,
+            'name' => $record['name'],
+            'address' => $record['address'],
+            'memo' => $record['memo']
+        ];
+    }
 }
 
 ?>
