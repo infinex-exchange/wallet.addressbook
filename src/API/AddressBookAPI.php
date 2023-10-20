@@ -67,7 +67,7 @@ class AddressBookAPI {
                         [ 'netid' => $netid ]
                     ) -> then(
                         function($network) use(&$mapNetworks, $netid) {
-                            $mapNetworks[$netid] = $network['symbol'];
+                            $mapNetworks[$netid] = $network;
                         }
                     );
                 }
@@ -101,7 +101,7 @@ class AddressBookAPI {
             [ 'netid' => $address['netid'] ]
         ) -> then(
             function($network) use($th, $address) {
-                return $th -> ptpAddress($address, $network['symbol']);
+                return $th -> ptpAddress($address, $network);
             }
         );
     }
@@ -141,13 +141,18 @@ class AddressBookAPI {
         return $this -> getAddress($path, [], [], $auth);
     }
     
-    private function ptpAddress($record, $networkSymbol) {
+    private function ptpAddress($record, $network) {
         return [
             'adbkid' => $record['adbkid'],
-            'network' => $networkSymbol,
             'name' => $record['name'],
             'address' => $record['address'],
-            'memo' => $record['memo']
+            'memo' => $record['memo'],
+            'network' => [
+                'symbol' => $network['symbol'],
+                'name' => $network['name'],
+                'iconUrl' => $network['iconUrl'],
+                'memoName' => $network['memoName']
+            ]
         ];
     }
 }
