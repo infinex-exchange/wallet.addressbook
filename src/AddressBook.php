@@ -204,53 +204,6 @@ class AddressBook {
         if(!$this -> validateAdbkName($body['name']))
             throw new Error('VALIDATION_ERROR', 'name', 400);
         
-        $this -> pdo -> beginTransaction();
-        
-        // Get uid and netid
-        $task = [
-            ':adbkid' => $body['adbkid']
-        ];
-        
-        $sql = 'SELECT uid,
-                       netid
-                FROM withdrawal_adbk
-                WHERE adbkid = :adbkid
-                FOR UPDATE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $addr = $q -> fetch();
-        
-        if(!$addr) {
-            $this -> pdo -> rollBack();
-            throw new Error('NOT_FOUND', 'Address '.$body['adbkid'].' not found', 404);
-        }
-        
-        // Check address with the same name exists
-        $task = [
-            ':uid' => $addr['uid'],
-            ':netid' => $addr['netid'],
-            ':name' => $body['name'],
-            ':adbkid' => $body['adbkid']
-        ];
-        
-        $sql = 'SELECT 1
-                FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND netid = :netid
-                AND name = :name
-                AND adbkid != :adbkid
-                FOR UPDATE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-        
-        if($row) {
-            $this -> pdo -> rollBack();
-            throw new Error('CONFLICT', 'Name already used in address book', 409);
-        }
-        
         // Update
         $task = [
             ':adbkid' => $body['adbkid'],
@@ -259,12 +212,20 @@ class AddressBook {
         
         $sql = 'UPDATE withdrawal_adbk
                 SET name = :name
-                WHERE adbkid = :adbkid';
+                WHERE adbkid = :adbkid
+                RETURNING 1';
         
         $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
+        try {
+            $q -> execute($task);
+        } catch(\PDOException $e) {
+            if($e -> getCode() != 23505) throw $e;
+            throw new Error('CONFLICT', 'Address with this name already exists', 409);
+        }
         
-        $this -> pdo -> commit();
+        $row = $q -> fetch();
+        if(!$row)
+            throw new Error('NOT_FOUND', 'Address '.$body['adbkid'].' not found', 404);
     }
     
     public function createAddress($body) {
@@ -289,42 +250,6 @@ class AddressBook {
         if(isset($body['memo']) && !is_string($body['memo']))
             throw new Error('VALIDATION_ERROR', 'memo');
         
-        $this -> pdo -> beginTransaction();
-        
-        $task = array(
-            ':uid' => $body['uid'],
-            ':netid' => $body['netid'],
-            ':address' => $body['address'],
-            ':name' => $body['name'],
-            ':memo' => @$body['memo']
-        );
-        
-        $sql = 'SELECT name
-                FROM withdrawal_adbk
-                WHERE uid = :uid
-                AND netid = :netid
-                AND (
-                    name = :name
-                    OR (
-                        address = :address
-                        AND memo IS NOT DISTINCT FROM :memo
-                    )
-                )
-                FOR UPDATE';
-        
-        $q = $this -> pdo -> prepare($sql);
-        $q -> execute($task);
-        $row = $q -> fetch();
-            
-        if($row) {
-            $pdo -> rollBack();
-            
-            if($row['name'] == $body['name'])
-                throw new Error('CONFLICT', 'Name already used in address book', 409);
-            
-            throw new Error('CONFLICT', 'Address already stored as "'.$row['name'].'"', 409);
-        }
-        
         $sql = 'INSERT INTO withdrawal_adbk(
                 uid,
                 netid,
@@ -338,13 +263,15 @@ class AddressBook {
                 :name,
                 :memo
             )
+            ON CONFLICT DO NOTHING
             RETURNING adbkid';
         
         $q = $this -> pdo -> prepare($sql);
         $q -> execute($task);
         $row = $q -> fetch();
         
-        $this -> pdo -> commit();
+        if(!$row)
+            throw new Error('CONFLICT', 'Address or name already used in addressbook', 409);
         
         return [
             'adbkid' => $row['adbkid']
